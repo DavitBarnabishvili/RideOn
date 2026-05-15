@@ -42,4 +42,10 @@ public class UserService implements UserDetailsService {
                         .build())
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
     }
+
+    public UserResponse getByEmail(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
+        return new UserResponse(user.getId(), user.getEmail(), user.getCreatedAt());
+    }
 }
