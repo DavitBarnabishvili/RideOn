@@ -81,7 +81,8 @@ src/main/java/com/rideon/
 ├── dto/           Request and response objects
 ├── exception/     Custom exceptions
 ├── repository/    JPA repositories
-└── service/       Business logic
+├── service/       Business logic
+└── security/      JWT filter, entry point, utilities
 ```
 
 ## Build phases

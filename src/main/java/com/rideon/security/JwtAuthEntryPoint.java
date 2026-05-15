@@ -25,7 +25,7 @@ public class JwtAuthEntryPoint implements AuthenticationEntryPoint {
     ) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
-        ErrorResponse error = new ErrorResponse(401, "Unauthorized — valid JWT required");
+        ErrorResponse error = new ErrorResponse(401, "Unauthorized - valid JWT required");
         response.getWriter().write(objectMapper.writeValueAsString(error));
     }
 }
