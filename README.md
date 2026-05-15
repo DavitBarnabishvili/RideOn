@@ -15,17 +15,13 @@ RideOn replaces all three for the specific context of motorcycle riding.
 
 ## Why this exists
 
-This project started because I actually ride motorcycles and the problem is real - I want a tool that tells me what the weather will be like at a specific point on a route at the specific time I'll be there.
+This project started because I actually ride motorcycles and the problem is real - I want a tool that tells me what the weather will be like at a specific point on a route at the specific time I'll be there.  I want to know relevant information about road surface, or even how fun the route is - something that no one but a rider who's been there would be able to say. And with all of that, I also want a tool to connect to people in the community, plan rides together, share routes, help each other.
 
-I want to know relevant information about road surface, or even how fun the route is - something that no one but a rider who's been there would be able to say.
+The project is also deliberately built to be a learning journey. I want to take something from zero to a real, released product and understand every layer along the way.
 
-And with all of that, I also want a tool to connect to people in the community, plan rides together, share routes, help each other.
+The architecture evolves intentionally through stages: starting as a simple local monolith, splitting into microservices, containerizing with full observability, and eventually migrating to a cloud-deployed production monster on AWS. Each migration is done manually and deliberately, not skipped to the end state, because the point is to understand *why* each architectural decision exists.
 
-The project is also deliberately built to be a learning journey. I want to take something from zero to a real, released product — not a tutorial clone, not a throwaway — and understand every layer along the way.
-
-The architecture evolves intentionally through stages: starting as a simple local monolith, splitting into microservices, containerizing with full observability, and eventually migrating to a cloud-deployed production system on AWS. Each migration is done manually and deliberately, not skipped to the end state, because the point is to understand *why* each architectural decision exists — not just that it does.
-
-This means the codebase at any given point reflects where I am in that journey, not where it's going. The foundation is built to support what comes next without having to tear down what came before.
+This means the codebase at any given point reflects where I am in that journey, not where it's going.
 
 ## Features (in progress)
 
