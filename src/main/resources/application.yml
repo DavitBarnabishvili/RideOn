@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://json.schemastore.org/spring-boot
+
 spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME}
@@ -20,3 +22,7 @@ application:
     jwt:
       secret-key: 404D635166546A576E5A7234753778214125442A472D4B6150645367566B5970
       expiration-ms: 86400000
+  cloudinary:
+    cloud-name: ${CLOUDINARY_CLOUD_NAME:test}
+    api-key: ${CLOUDINARY_API_KEY:test}
+    api-secret: ${CLOUDINARY_API_SECRET:test}

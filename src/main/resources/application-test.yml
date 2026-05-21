@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://json.schemastore.org/spring-boot
+
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/rideon
@@ -11,3 +13,8 @@ application:
     jwt:
       secret-key: 404D635166546A576E5A7234753778214125442A472D4B6150645367566B5970
       expiration-ms: 86400000
+  application:
+    cloudinary:
+      cloud-name: test
+      api-key: test
+      api-secret: test
