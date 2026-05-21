@@ -113,8 +113,11 @@
 			<artifactId>postgresql</artifactId>
 			<scope>test</scope>
 		</dependency>
-	</dependencies>
-
+		<dependency>
+			<groupId>com.cloudinary</groupId>
+			<artifactId>cloudinary-http45</artifactId>
+			<version>1.38.0</version>
+		</dependency>	</dependencies>
 	<build>
 		<plugins>
 			<plugin>
