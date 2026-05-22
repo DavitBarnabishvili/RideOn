@@ -8,6 +8,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -15,7 +16,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 class RideonApplicationTests {
 
 	@Container
-	static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16")
+	static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+			DockerImageName.parse("postgis/postgis:16-3.4")
+					.asCompatibleSubstituteFor("postgres")
+			).withInitScript("postgis-init.sql")
 			.withDatabaseName("rideon_test")
 			.withUsername("test")
 			.withPassword("test");
