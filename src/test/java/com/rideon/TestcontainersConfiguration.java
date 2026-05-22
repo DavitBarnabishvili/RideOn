@@ -12,7 +12,9 @@ class TestcontainersConfiguration {
 	@Bean
 	@ServiceConnection
 	PostgreSQLContainer<?> postgresContainer() {
-		return new PostgreSQLContainer<>(DockerImageName.parse("postgres:16"));
+		return new PostgreSQLContainer<>(
+				DockerImageName.parse("postgis/postgis:16-3.4")
+						.asCompatibleSubstituteFor("postgres")
+		).withInitScript("postgis-init.sql");
 	}
-
 }

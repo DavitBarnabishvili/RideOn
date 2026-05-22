@@ -117,7 +117,20 @@
 			<groupId>com.cloudinary</groupId>
 			<artifactId>cloudinary-http45</artifactId>
 			<version>1.38.0</version>
-		</dependency>	</dependencies>
+		</dependency>
+		<!-- Hibernate Spatial — teaches Hibernate about geometry types -->
+		<dependency>
+			<groupId>org.hibernate.orm</groupId>
+			<artifactId>hibernate-spatial</artifactId>
+		</dependency>
+
+		<!-- JTS — the geometry library Hibernate Spatial uses under the hood -->
+		<dependency>
+			<groupId>org.locationtech.jts</groupId>
+			<artifactId>jts-core</artifactId>
+			<version>1.19.0</version>
+		</dependency>
+	</dependencies>
 	<build>
 		<plugins>
 			<plugin>

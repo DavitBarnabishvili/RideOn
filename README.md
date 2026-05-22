@@ -38,6 +38,8 @@ This means the codebase at any given point reflects where I am in that journey, 
 | Language | Java 21 |
 | Framework | Spring Boot 3, Spring Security 6 |
 | Database | PostgreSQL 16 + PostGIS, Flyway migrations |
+| Auth | JWT, BCrypt |
+| File storage | Cloudinary *(dev)* → S3 *(prod)* |
 | Testing | JUnit 5, Mockito, Testcontainers |
 | Build | Maven |
 | Local infra | Docker, Docker Compose |
@@ -51,7 +53,7 @@ This means the codebase at any given point reflects where I am in that journey, 
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/yourusername/rideon.git
+git clone https://github.com/DavitBarnabishvili/rideon.git
 cd rideon
 
 # 2. Copy the example env file and fill in your values
@@ -68,6 +70,7 @@ docker compose up -d
 ```
 
 The app will be available at `http://localhost:8080`.
+Swagger UI: `http://localhost:8080/swagger-ui/index.html`
 
 ## Environment variables
 
@@ -80,20 +83,20 @@ Copy `.env.example` to `.env` and set the following:
 | `DB_PASSWORD` | Postgres password |
 | `DB_HOST` | Database host (default: localhost) |
 | `DB_PORT` | Database port (default: 5432) |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud name |
+| `CLOUDINARY_API_KEY` | Cloudinary API key |
+| `CLOUDINARY_API_SECRET` | Cloudinary API secret |
 
 ## Project structure
-
-```
 src/main/java/com/rideon/
 ├── config/        Spring configuration classes
 ├── controller/    REST endpoints
 ├── domain/        Entities and value objects
 ├── dto/           Request and response objects
-├── exception/     Custom exceptions
+├── exception/     Custom exceptions and error handling
 ├── repository/    JPA repositories
-├── service/       Business logic
-└── security/      JWT filter, entry point, utilities
-```
+├── security/      JWT filter, entry point, utilities
+└── service/       Business logic
 
 ## Build phases
 
