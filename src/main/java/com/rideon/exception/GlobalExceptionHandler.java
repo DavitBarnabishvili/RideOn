@@ -52,4 +52,11 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.NOT_FOUND)
                 .body(new ErrorResponse(404, ex.getMessage()));
     }
+
+    @ExceptionHandler(RouteNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleRouteNotFound(RouteNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse(404, ex.getMessage()));
+    }
 }
