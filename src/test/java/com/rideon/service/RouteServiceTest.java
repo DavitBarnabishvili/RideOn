@@ -40,6 +40,7 @@ class RouteServiceTest {
         user = new User();
         user.setEmail("rider@example.com");
         user.setPassword("hashed");
+        user.setId(UUID.randomUUID());
     }
 
     private RouteRequest buildRequest(String visibility) {
@@ -157,5 +158,24 @@ class RouteServiceTest {
                 .hasMessageContaining("Protected");
 
         verify(routeRepository, never()).delete(any());
+    }
+
+    @Test
+    void exportGpx_throwsRouteNotFoundException_whenRouteIsPrivateAndNotOwned() {
+        UUID routeId = UUID.randomUUID();
+
+        User otherUser = new User();
+        otherUser.setId(UUID.randomUUID());
+        otherUser.setEmail("other@example.com");
+
+        Route privateRoute = buildSavedRoute();
+        privateRoute.setVisibility("private");
+        privateRoute.setUser(otherUser);
+
+        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(routeRepository.findById(routeId)).thenReturn(Optional.of(privateRoute));
+
+        assertThatThrownBy(() -> routeService.exportGpx("rider@example.com", routeId))
+                .isInstanceOf(RouteNotFoundException.class);
     }
 }
