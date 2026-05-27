@@ -10,6 +10,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -18,8 +19,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -144,5 +148,38 @@ class RouteControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(routeBody("Unauthorized", "public")))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void importGpx_createsRouteFromFile() throws Exception {
+        byte[] gpxBytes = Files.readAllBytes(Path.of("src/test/resources/test-route.gpx"));
+
+        mockMvc.perform(multipart("/api/v1/routes/import")
+                        .file(new MockMultipartFile("file", "test-route.gpx",
+                                "application/gpx+xml", gpxBytes))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.title").value("Tbilisi to Mtskheta"))
+                .andExpect(jsonPath("$.coordinates").isArray())
+                .andExpect(jsonPath("$.coordinates.length()").value(4));
+    }
+
+    @Test
+    void exportGpx_returnsGpxFile() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Export Me", "public")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(result.getResponse().getContentAsString())
+                .get("id").asText();
+
+        mockMvc.perform(get("/api/v1/routes/" + routeId + "/export")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", containsString("attachment")))
+                .andExpect(content().contentType("application/gpx+xml"))
+                .andExpect(content().string(containsString("<gpx")));
     }
 }

@@ -6,9 +6,11 @@ import com.rideon.service.RouteService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -28,6 +30,28 @@ public class RouteController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(routeService.createRoute(authentication.getName(), request));
+    }
+
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<RouteResponse> importGpx(
+            @RequestPart MultipartFile file,
+            Authentication authentication
+    ) {
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(routeService.importGpx(authentication.getName(), file));
+    }
+
+    @GetMapping(value = "/{id}/export", produces = "application/gpx+xml")
+    public ResponseEntity<byte[]> exportGpx(
+            @PathVariable UUID id,
+            Authentication authentication
+    ) {
+        byte[] gpxBytes = routeService.exportGpx(authentication.getName(), id);
+        String filename = "route-" + id + ".gpx";
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
+                .body(gpxBytes);
     }
 
     @GetMapping("/my")

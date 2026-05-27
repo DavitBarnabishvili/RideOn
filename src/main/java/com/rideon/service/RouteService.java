@@ -7,6 +7,9 @@ import com.rideon.dto.response.RouteResponse;
 import com.rideon.exception.RouteNotFoundException;
 import com.rideon.repository.RouteRepository;
 import com.rideon.repository.UserRepository;
+import io.jenetics.jpx.GPX;
+import io.jenetics.jpx.Track;
+import io.jenetics.jpx.TrackSegment;
 import lombok.RequiredArgsConstructor;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
@@ -14,7 +17,10 @@ import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.PrecisionModel;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -30,9 +36,7 @@ public class RouteService {
             new GeometryFactory(new PrecisionModel(), 4326);
 
     public RouteResponse createRoute(String email, RouteRequest request) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
-
+        User user = findUser(email);
         LineString path = toLineString(request.coordinates());
 
         Route route = new Route();
@@ -40,15 +44,82 @@ public class RouteService {
         route.setTitle(request.title());
         route.setDescription(request.description());
         route.setPath(path);
-        route.setDistanceM(path.getLength() * 111_320); // rough degrees-to-meters, to be changed in phase 2
+        route.setDistanceM(path.getLength() * 111_320);
         route.setVisibility(request.visibility() != null ? request.visibility() : "public");
 
         return toResponse(routeRepository.save(route));
     }
 
+    public RouteResponse importGpx(String email, MultipartFile file) {
+        User user = findUser(email);
+
+        GPX gpx;
+        try {
+            gpx = GPX.Reader.of(GPX.Reader.Mode.LENIENT).read(file.getInputStream());
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Could not read GPX file", e);
+        }
+
+        List<double[]> coordinates = gpx.tracks()
+                .flatMap(Track::segments)
+                .flatMap(TrackSegment::points)
+                .map(wp -> new double[]{
+                        wp.getLongitude().doubleValue(),
+                        wp.getLatitude().doubleValue()
+                })
+                .toList();
+
+        if (coordinates.size() < 2) {
+            throw new IllegalArgumentException("GPX file must contain at least 2 track points");
+        }
+
+        String title = gpx.tracks()
+                .findFirst()
+                .flatMap(Track::getName)
+                .orElse("Imported route");
+
+        LineString path = toLineString(coordinates);
+
+        Route route = new Route();
+        route.setUser(user);
+        route.setTitle(title);
+        route.setPath(path);
+        route.setDistanceM(path.getLength() * 111_320);
+        route.setVisibility("public");
+
+        return toResponse(routeRepository.save(route));
+    }
+
+    public byte[] exportGpx(String email, UUID routeId) {
+        User user = findUser(email);
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RouteNotFoundException("Route not found: " + routeId));
+
+        if (route.getVisibility().equals("private") && !route.getUser().getId().equals(user.getId())) {
+            throw new RouteNotFoundException("Route not found: " + routeId);
+        }
+
+        GPX gpx = GPX.builder()
+                .addTrack(track -> track
+                        .name(route.getTitle())
+                        .addSegment(seg -> {
+                            for (Coordinate c : route.getPath().getCoordinates()) {
+                                seg.addPoint(p -> p.lat(c.y).lon(c.x));
+                            }
+                        }))
+                .build();
+
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            GPX.Writer.DEFAULT.write(gpx, out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to serialize route to GPX", e);
+        }
+    }
+
     public List<RouteResponse> getMyRoutes(String email) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
+        User user = findUser(email);
         return routeRepository.findByUserId(user.getId())
                 .stream()
                 .map(this::toResponse)
@@ -64,9 +135,7 @@ public class RouteService {
     }
 
     public void deleteRoute(String email, UUID routeId) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
-
+        User user = findUser(email);
         Route route = routeRepository.findByIdAndUserId(routeId, user.getId())
                 .orElseThrow(() -> new RouteNotFoundException("Route not found: " + routeId));
 
@@ -75,6 +144,13 @@ public class RouteService {
         }
 
         routeRepository.delete(route);
+    }
+
+    // ── private helpers ──────────────────────────────────────────────────────
+
+    private User findUser(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
     }
 
     private LineString toLineString(List<double[]> coordinates) {
