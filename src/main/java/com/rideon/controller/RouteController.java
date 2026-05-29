@@ -35,14 +35,16 @@ public class RouteController {
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<RouteResponse> importGpx(
             @RequestPart MultipartFile file,
+            @RequestParam(defaultValue = "public") String visibility,
+            @RequestParam(required = false) String description,
             Authentication authentication
     ) {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(routeService.importGpx(authentication.getName(), file));
+                .body(routeService.importGpx(authentication.getName(), file, visibility, description));
     }
 
-    @GetMapping(value = "/{id}/export", produces = "application/gpx+xml")
+    @GetMapping("/{id}/export")
     public ResponseEntity<byte[]> exportGpx(
             @PathVariable UUID id,
             Authentication authentication
@@ -50,6 +52,7 @@ public class RouteController {
         byte[] gpxBytes = routeService.exportGpx(authentication.getName(), id);
         String filename = "route-" + id + ".gpx";
         return ResponseEntity.ok()
+                .header("Content-Type", "application/gpx+xml")
                 .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
                 .body(gpxBytes);
     }

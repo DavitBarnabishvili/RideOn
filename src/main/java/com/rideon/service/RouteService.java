@@ -50,7 +50,13 @@ public class RouteService {
         return toResponse(routeRepository.save(route));
     }
 
-    public RouteResponse importGpx(String email, MultipartFile file) {
+    public RouteResponse importGpx(String email, MultipartFile file,
+                                   String visibility, String description) {
+
+        if (visibility != null && !visibility.equals("public") && !visibility.equals("private")) {
+            throw new IllegalArgumentException("Visibility must be 'public' or 'private'");
+        }
+
         User user = findUser(email);
 
         GPX gpx;
@@ -78,14 +84,15 @@ public class RouteService {
                 .flatMap(Track::getName)
                 .orElse("Imported route");
 
-        LineString path = toLineString(coordinates);
+        LineString path = simplify(toLineString(coordinates));
 
         Route route = new Route();
         route.setUser(user);
         route.setTitle(title);
+        route.setDescription(description);
         route.setPath(path);
         route.setDistanceM(path.getLength() * 111_320);
-        route.setVisibility("public");
+        route.setVisibility(visibility != null ? visibility : "public");
 
         return toResponse(routeRepository.save(route));
     }
@@ -177,5 +184,13 @@ public class RouteService {
                 route.getPopularityScore(),
                 route.getCreatedAt()
         );
+    }
+
+    private LineString simplify(LineString path) {
+        // Douglas-Peucker: removes points deviating less than ~11m from the simplified line.
+        // Epsilon in degrees — 0.0001° ≈ 11m
+        var simplified = org.locationtech.jts.simplify.DouglasPeuckerSimplifier
+                .simplify(path, 0.0001);
+        return (LineString) simplified;
     }
 }

@@ -165,6 +165,21 @@ class RouteControllerIntegrationTest {
     }
 
     @Test
+    void importGpx_respectsVisibilityParam() throws Exception {
+        byte[] gpxBytes = Files.readAllBytes(Path.of("src/test/resources/test-route.gpx"));
+
+        mockMvc.perform(multipart("/api/v1/routes/import")
+                        .file(new MockMultipartFile("file", "test-route.gpx",
+                                "application/gpx+xml", gpxBytes))
+                        .param("visibility", "private")
+                        .param("description", "My private route")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.visibility").value("private"))
+                .andExpect(jsonPath("$.description").value("My private route"));
+    }
+
+    @Test
     void exportGpx_returnsGpxFile() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/routes")
                         .header("Authorization", "Bearer " + token)
