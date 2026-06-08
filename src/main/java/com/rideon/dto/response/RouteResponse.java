@@ -9,8 +9,13 @@ public record RouteResponse(
         UUID userId,
         String title,
         String description,
-        List<double[]> coordinates,
+        // Each element is [lon, lat, ele]. ele is null when elevation data is
+        // not yet available (pre-OpenTopoData integration). Double[] (boxed)
+        // so the third element can be null rather than NaN.
+        List<Double[]> coordinates,
         Double distanceM,
+        Double elevationGainM,
+        Double elevationLossM,
         String visibility,
         boolean isProtected,
         Double popularityScore,

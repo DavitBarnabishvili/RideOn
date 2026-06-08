@@ -6,7 +6,6 @@ import com.rideon.dto.request.BikeRequest;
 import com.rideon.dto.response.BikeResponse;
 import com.rideon.exception.BikeNotFoundException;
 import com.rideon.repository.BikeRepository;
-import com.rideon.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,7 +28,7 @@ import static org.mockito.Mockito.*;
 class BikeServiceTest {
 
     @Mock private BikeRepository bikeRepository;
-    @Mock private UserRepository userRepository;
+    @Mock private UserService userService;
     @Mock private FileStorageService fileStorageService;
 
     @InjectMocks
@@ -57,7 +56,7 @@ class BikeServiceTest {
     void addBike_returnsBikeResponse_whenUserExists() {
         var request = new BikeRequest("KTM", "DUKE", 2019, 200, "naked", "Ginger");
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(bikeRepository.save(any(Bike.class))).thenReturn(bike);
 
         BikeResponse response = bikeService.addBike("rider@example.com", request);
@@ -71,7 +70,7 @@ class BikeServiceTest {
     void addBike_throwsUsernameNotFoundException_whenUserNotFound() {
         var request = new BikeRequest("KTM", "DUKE", 2019, 200, null, null);
 
-        when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+        when(userService.requireUser("ghost@example.com")).thenThrow(new UsernameNotFoundException("User not found: ghost@example.com"));
 
         assertThatThrownBy(() -> bikeService.addBike("ghost@example.com", request))
                 .isInstanceOf(UsernameNotFoundException.class);
@@ -83,7 +82,7 @@ class BikeServiceTest {
 
     @Test
     void getBikesForUser_returnsListOfBikes() {
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(bikeRepository.findByUserId(any())).thenReturn(List.of(bike));
 
         List<BikeResponse> responses = bikeService.getBikesForUser("rider@example.com");
@@ -99,7 +98,7 @@ class BikeServiceTest {
         UUID bikeId = UUID.randomUUID();
         var file = new MockMultipartFile("file", "photo.jpg", "image/jpeg", "data".getBytes());
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(bikeRepository.findByIdAndUserId(bikeId, user.getId())).thenReturn(Optional.of(bike));
         when(fileStorageService.store(file, "bikes")).thenReturn("https://cloudinary.com/photo.jpg");
         when(bikeRepository.save(any(Bike.class))).thenReturn(bike);
@@ -115,7 +114,7 @@ class BikeServiceTest {
         UUID bikeId = UUID.randomUUID();
         var file = new MockMultipartFile("file", "photo.jpg", "image/jpeg", "data".getBytes());
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(bikeRepository.findByIdAndUserId(bikeId, user.getId())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> bikeService.uploadPhoto("rider@example.com", bikeId, file))
@@ -130,7 +129,7 @@ class BikeServiceTest {
     void deleteBike_deletesBike_whenOwnedByUser() {
         UUID bikeId = UUID.randomUUID();
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(bikeRepository.findByIdAndUserId(bikeId, user.getId())).thenReturn(Optional.of(bike));
 
         bikeService.deleteBike("rider@example.com", bikeId);
@@ -142,7 +141,7 @@ class BikeServiceTest {
     void deleteBike_throwsBikeNotFoundException_whenBikeNotOwnedByUser() {
         UUID bikeId = UUID.randomUUID();
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(bikeRepository.findByIdAndUserId(bikeId, user.getId())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> bikeService.deleteBike("rider@example.com", bikeId))
