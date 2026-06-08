@@ -15,6 +15,10 @@ public interface RouteRepository extends JpaRepository<Route, UUID> {
 
     Optional<Route> findByIdAndUserId(UUID id, UUID userId);
 
+    // Browse a specific user's routes filtered by visibility — used by the
+    // public "browse another rider's public routes" endpoint. Never exposes
+    // private routes regardless of who is asking - even for the owner
+    List<Route> findByUserIdAndVisibility(UUID userId, String visibility);
     @Query(value = """
             SELECT r.* FROM routes r
             WHERE r.visibility = 'public'

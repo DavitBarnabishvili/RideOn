@@ -3,6 +3,7 @@ package com.rideon.service;
 import com.rideon.domain.Route;
 import com.rideon.domain.User;
 import com.rideon.dto.request.RouteRequest;
+import com.rideon.dto.request.UpdateRouteRequest;
 import com.rideon.dto.response.RouteResponse;
 import com.rideon.exception.RouteNotFoundException;
 import com.rideon.repository.RouteRepository;
@@ -57,8 +58,8 @@ public class RouteService {
     public RouteResponse importGpx(String email, MultipartFile file,
                                    String visibility, String description) {
 
-        if (visibility != null && !visibility.equals("public") && !visibility.equals("private")) {
-            throw new IllegalArgumentException("Visibility must be 'public' or 'private'");
+        if (visibility != null) {
+            validateVisibility(visibility);
         }
 
         User user = userService.requireUser(email);
@@ -156,6 +157,54 @@ public class RouteService {
                 .stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<RouteResponse> getPublicRoutesByUser(UUID userId) {
+        // Public-only, always — even for the owner. Owners use /routes/my for
+        // their full list. Unknown userId simply yields an empty list; Not
+        // 404 here, to avoid confirming whether a user exists.
+        return routeRepository.findByUserIdAndVisibility(userId, "public")
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional
+    public RouteResponse updateRoute(String email, UUID routeId, UpdateRouteRequest request) {
+        User user = userService.requireUser(email);
+
+        // Non-owner (or missing) route returns 404, never 403 — we never confirm
+        // a route's existence to someone who doesn't own it.
+        Route route = routeRepository.findByIdAndUserId(routeId, user.getId())
+                .orElseThrow(() -> new RouteNotFoundException("Route not found: " + routeId));
+
+        // Protected routes are community-owned: block all metadata
+        // edits (mirrors deleteRoute) so an owner can't flip one to private and
+        // hide it. Relax to per-field rules when the admin/role system exists.
+        if (route.isProtected()) {
+            throw new IllegalStateException("Protected routes cannot be modified");
+        }
+
+        // PATCH semantics: only non-null fields are applied. A present field is
+        // validated; a null field is left unchanged. Geometry is not editable.
+        if (request.title() != null) {
+            if (request.title().isBlank()) {
+                throw new IllegalArgumentException("Title must not be blank");
+            }
+            route.setTitle(request.title());
+        }
+
+        if (request.description() != null) {
+            route.setDescription(request.description());
+        }
+
+        if (request.visibility() != null) {
+            validateVisibility(request.visibility());
+            route.setVisibility(request.visibility());
+        }
+
+        return toResponse(routeRepository.save(route));
     }
 
     @Transactional
@@ -261,5 +310,11 @@ public class RouteService {
         var simplified = org.locationtech.jts.simplify.DouglasPeuckerSimplifier
                 .simplify(path, 0.0001);
         return (LineString) simplified;
+    }
+
+    private void validateVisibility(String visibility) {
+        if (!visibility.equals("public") && !visibility.equals("private")) {
+            throw new IllegalArgumentException("Visibility must be 'public' or 'private'");
+        }
     }
 }

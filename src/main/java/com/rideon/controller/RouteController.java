@@ -1,6 +1,7 @@
 package com.rideon.controller;
 
 import com.rideon.dto.request.RouteRequest;
+import com.rideon.dto.request.UpdateRouteRequest;
 import com.rideon.dto.response.RouteResponse;
 import com.rideon.service.RouteService;
 import jakarta.validation.Valid;
@@ -32,6 +33,16 @@ public class RouteController {
                 .body(routeService.createRoute(authentication.getName(), request));
     }
 
+    @PatchMapping("/{id}")
+    public ResponseEntity<RouteResponse> updateRoute(
+            @PathVariable UUID id,
+            @RequestBody UpdateRouteRequest request,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(
+                routeService.updateRoute(authentication.getName(), id, request));
+    }
+
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<RouteResponse> importGpx(
             @RequestPart MultipartFile file,
@@ -60,6 +71,11 @@ public class RouteController {
     @GetMapping("/my")
     public ResponseEntity<List<RouteResponse>> getMyRoutes(Authentication authentication) {
         return ResponseEntity.ok(routeService.getMyRoutes(authentication.getName()));
+    }
+
+    @GetMapping(params = "userId")
+    public ResponseEntity<List<RouteResponse>> getRoutesByUser(@RequestParam UUID userId) {
+        return ResponseEntity.ok(routeService.getPublicRoutesByUser(userId));
     }
 
     @GetMapping("/near")
