@@ -6,10 +6,13 @@ import com.rideon.dto.request.RouteRequest;
 import com.rideon.dto.response.RouteResponse;
 import com.rideon.exception.RouteNotFoundException;
 import com.rideon.repository.RouteRepository;
-import com.rideon.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.GeometryFactory;
+import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.PrecisionModel;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -28,12 +31,12 @@ import static org.mockito.Mockito.*;
 class RouteServiceTest {
 
     @Mock private RouteRepository routeRepository;
-    @Mock private UserRepository userRepository;
+    @Mock private UserService userService;
 
-    @InjectMocks
     private RouteService routeService;
 
     private User user;
+    private GeometryFactory gf;
 
     @BeforeEach
     void setUp() {
@@ -41,6 +44,8 @@ class RouteServiceTest {
         user.setEmail("rider@example.com");
         user.setPassword("hashed");
         user.setId(UUID.randomUUID());
+        gf = new GeometryFactory(new PrecisionModel(), 4326);
+        routeService = new RouteService(routeRepository, userService, gf);
     }
 
     private RouteRequest buildRequest(String visibility) {
@@ -52,29 +57,43 @@ class RouteServiceTest {
         );
     }
 
+    /** 2D route — no elevation, Z will be NaN on all coordinates. */
     private Route buildSavedRoute() {
-        RouteRequest request = buildRequest("public");
-        org.locationtech.jts.geom.GeometryFactory gf =
-                new org.locationtech.jts.geom.GeometryFactory(
-                        new org.locationtech.jts.geom.PrecisionModel(), 4326);
-        org.locationtech.jts.geom.LineString path = gf.createLineString(
-                new org.locationtech.jts.geom.Coordinate[]{
-                        new org.locationtech.jts.geom.Coordinate(44.79, 41.69),
-                        new org.locationtech.jts.geom.Coordinate(44.82, 41.72)
-                });
+        LineString path = gf.createLineString(new Coordinate[]{
+                new Coordinate(44.79, 41.69),
+                new Coordinate(44.82, 41.72)
+        });
         Route route = new Route();
         route.setUser(user);
-        route.setTitle(request.title());
-        route.setDescription(request.description());
+        route.setTitle("Mountain Pass");
+        route.setDescription("A great route");
         route.setPath(path);
         route.setVisibility("public");
         route.setPopularityScore(0.0);
         return route;
     }
 
+    /** 3D route — elevation present on all coordinates. */
+    private Route buildSavedRouteWithElevation() {
+        LineString path = gf.createLineString(new Coordinate[]{
+                new Coordinate(44.79, 41.69, 490),
+                new Coordinate(44.82, 41.72, 540)
+        });
+        Route route = new Route();
+        route.setUser(user);
+        route.setTitle("Mountain Pass");
+        route.setDescription("A great route");
+        route.setPath(path);
+        route.setVisibility("public");
+        route.setPopularityScore(0.0);
+        route.setElevationGainM(50.0);
+        route.setElevationLossM(0.0);
+        return route;
+    }
+
     @Test
     void createRoute_returnsRouteResponse_whenUserExists() {
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.save(any(Route.class))).thenReturn(buildSavedRoute());
 
         RouteResponse response = routeService.createRoute("rider@example.com", buildRequest("public"));
@@ -86,7 +105,7 @@ class RouteServiceTest {
 
     @Test
     void createRoute_defaultsToPublic_whenVisibilityIsNull() {
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.save(any(Route.class))).thenReturn(buildSavedRoute());
 
         RouteResponse response = routeService.createRoute("rider@example.com", buildRequest(null));
@@ -95,8 +114,21 @@ class RouteServiceTest {
     }
 
     @Test
+    void createRoute_hasNullElevation_whenCreatedManually() {
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.save(any(Route.class))).thenReturn(buildSavedRoute());
+
+        RouteResponse response = routeService.createRoute("rider@example.com", buildRequest("public"));
+
+        // Manual routes have no elevation — all coordinate Z values should be null
+        assertThat(response.coordinates()).allSatisfy(c -> assertThat(c[2]).isNull());
+        assertThat(response.elevationGainM()).isNull();
+        assertThat(response.elevationLossM()).isNull();
+    }
+
+    @Test
     void createRoute_throwsUsernameNotFoundException_whenUserNotFound() {
-        when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+        when(userService.requireUser("ghost@example.com")).thenThrow(new UsernameNotFoundException("User not found: ghost@example.com"));
 
         assertThatThrownBy(() -> routeService.createRoute("ghost@example.com", buildRequest("public")))
                 .isInstanceOf(UsernameNotFoundException.class);
@@ -106,7 +138,7 @@ class RouteServiceTest {
 
     @Test
     void getMyRoutes_returnsRoutesForUser() {
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.findByUserId(any())).thenReturn(List.of(buildSavedRoute()));
 
         List<RouteResponse> routes = routeService.getMyRoutes("rider@example.com");
@@ -116,11 +148,23 @@ class RouteServiceTest {
     }
 
     @Test
+    void getMyRoutes_returnsElevationFields_whenRouteHasElevation() {
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findByUserId(any())).thenReturn(List.of(buildSavedRouteWithElevation()));
+
+        RouteResponse response = routeService.getMyRoutes("rider@example.com").getFirst();
+
+        assertThat(response.elevationGainM()).isEqualTo(50.0);
+        assertThat(response.elevationLossM()).isEqualTo(0.0);
+        assertThat(response.coordinates()).allSatisfy(c -> assertThat(c[2]).isNotNull());
+    }
+
+    @Test
     void deleteRoute_deletesRoute_whenOwnedAndNotProtected() {
         UUID routeId = UUID.randomUUID();
         Route route = buildSavedRoute();
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.findByIdAndUserId(routeId, user.getId()))
                 .thenReturn(Optional.of(route));
 
@@ -133,7 +177,7 @@ class RouteServiceTest {
     void deleteRoute_throwsRouteNotFoundException_whenNotOwned() {
         UUID routeId = UUID.randomUUID();
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.findByIdAndUserId(routeId, user.getId()))
                 .thenReturn(Optional.empty());
 
@@ -149,7 +193,7 @@ class RouteServiceTest {
         Route route = buildSavedRoute();
         route.setProtected(true);
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.findByIdAndUserId(routeId, user.getId()))
                 .thenReturn(Optional.of(route));
 
@@ -172,7 +216,7 @@ class RouteServiceTest {
         privateRoute.setVisibility("private");
         privateRoute.setUser(otherUser);
 
-        when(userRepository.findByEmail("rider@example.com")).thenReturn(Optional.of(user));
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.findById(routeId)).thenReturn(Optional.of(privateRoute));
 
         assertThatThrownBy(() -> routeService.exportGpx("rider@example.com", routeId))

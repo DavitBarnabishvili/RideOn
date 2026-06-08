@@ -55,8 +55,8 @@ class RouteRepositoryTest {
     private LineString buildLineString(double lon1, double lat1,
                                        double lon2, double lat2) {
         return geometryFactory.createLineString(new Coordinate[]{
-                new Coordinate(lon1, lat1),
-                new Coordinate(lon2, lat2)
+                new Coordinate(lon1, lat1, 0.0),
+                new Coordinate(lon2, lat2, 0.0)
         });
     }
 

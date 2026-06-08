@@ -20,8 +20,7 @@ class GpxServiceTest {
 
     @Test
     void parseGpx_extractsTrackPoints() throws Exception {
-        byte[] gpxBytes = Files.readAllBytes(
-                Path.of("src/test/resources/test-route.gpx"));
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
         MockMultipartFile file = new MockMultipartFile(
                 "file", "test-route.gpx", "application/gpx+xml", gpxBytes);
 
@@ -37,8 +36,7 @@ class GpxServiceTest {
 
     @Test
     void parseGpx_extractsTrackName() throws Exception {
-        byte[] gpxBytes = Files.readAllBytes(
-                Path.of("src/test/resources/test-route.gpx"));
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
 
         GPX gpx = GPX.Reader.DEFAULT.read(new java.io.ByteArrayInputStream(gpxBytes));
 

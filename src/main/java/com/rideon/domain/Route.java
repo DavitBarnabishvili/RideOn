@@ -33,11 +33,19 @@ public class Route {
 
     private String description;
 
-    @Column(nullable = false, columnDefinition = "GEOMETRY(LINESTRING, 4326)")
+    // columnDefinition removed — Hibernate-Spatial maps LineString to the
+    // DB geometry type directly. Flyway owns the column definition (LINESTRINGZ).
+    @Column(nullable = false)
     private LineString path;
 
     @Column(name = "distance_m")
     private Double distanceM;
+
+    @Column(name = "elevation_gain_m")
+    private Double elevationGainM;
+
+    @Column(name = "elevation_loss_m")
+    private Double elevationLossM;
 
     @Column(length = 20, nullable = false)
     private String visibility = "public";

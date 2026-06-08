@@ -10,6 +10,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
+import static org.assertj.core.api.Assertions.assertThat;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -152,7 +153,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void importGpx_createsRouteFromFile() throws Exception {
-        byte[] gpxBytes = Files.readAllBytes(Path.of("src/test/resources/test-route.gpx"));
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
 
         mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route.gpx",
@@ -166,7 +167,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void importGpx_respectsVisibilityParam() throws Exception {
-        byte[] gpxBytes = Files.readAllBytes(Path.of("src/test/resources/test-route.gpx"));
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
 
         mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route.gpx",
@@ -177,6 +178,43 @@ class RouteControllerIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.visibility").value("private"))
                 .andExpect(jsonPath("$.description").value("My private route"));
+    }
+
+    @Test
+    void importGpx_preservesElevation() throws Exception {
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
+
+        MvcResult result = mockMvc.perform(multipart("/api/v1/routes/import")
+                        .file(new MockMultipartFile("file", "test-route.gpx",
+                                "application/gpx+xml", gpxBytes))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.elevationGainM").isNumber())
+                .andExpect(jsonPath("$.elevationLossM").isNumber())
+                .andExpect(jsonPath("$.coordinates[0][2]").isNumber())
+                .andExpect(jsonPath("$.coordinates[1][2]").isNumber())
+                .andReturn();
+
+        // test-route.gpx points: 490 -> 510 -> 540 -> 472 (all 4 survive simplification)
+        // gain: (510-490) + (540-510) = 50m, loss: (540-472) = 68m
+        String body = result.getResponse().getContentAsString();
+        double gain = objectMapper.readTree(body).get("elevationGainM").asDouble();
+        double loss = objectMapper.readTree(body).get("elevationLossM").asDouble();
+        assertThat(gain).isEqualTo(50.0);
+        assertThat(loss).isEqualTo(68.0);
+    }
+
+    @Test
+    void createRoute_hasNullElevationInCoordinates() throws Exception {
+        mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("No Elevation Route", "public")))
+                .andExpect(status().isCreated())
+                // Manual routes: third coordinate element serializes as JSON null
+                .andExpect(jsonPath("$.coordinates[0][2]").doesNotExist())
+                .andExpect(jsonPath("$.elevationGainM").doesNotExist())
+                .andExpect(jsonPath("$.elevationLossM").doesNotExist());
     }
 
     @Test
