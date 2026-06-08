@@ -3,6 +3,7 @@ package com.rideon.service;
 import com.rideon.domain.Route;
 import com.rideon.domain.User;
 import com.rideon.dto.request.RouteRequest;
+import com.rideon.dto.request.UpdateRouteRequest;
 import com.rideon.dto.response.RouteResponse;
 import com.rideon.exception.RouteNotFoundException;
 import com.rideon.repository.RouteRepository;
@@ -13,7 +14,6 @@ import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.LineString;
 import org.locationtech.jts.geom.PrecisionModel;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -221,5 +221,137 @@ class RouteServiceTest {
 
         assertThatThrownBy(() -> routeService.exportGpx("rider@example.com", routeId))
                 .isInstanceOf(RouteNotFoundException.class);
+    }
+
+    // ── updateRoute ──────────────────────────────────────────────────────────
+
+    @Test
+    void updateRoute_updatesProvidedFields_andLeavesNullsUnchanged() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute(); // title "Mountain Pass", desc "A great route", public
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findByIdAndUserId(routeId, user.getId()))
+                .thenReturn(Optional.of(route));
+        when(routeRepository.save(any(Route.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var request = new UpdateRouteRequest("Renamed Pass", null, "private");
+        RouteResponse response = routeService.updateRoute("rider@example.com", routeId, request);
+
+        assertThat(response.title()).isEqualTo("Renamed Pass");
+        assertThat(response.description()).isEqualTo("A great route"); // null → unchanged
+        assertThat(response.visibility()).isEqualTo("private");
+        verify(routeRepository).save(route);
+    }
+
+    @Test
+    void updateRoute_throwsRouteNotFoundException_whenNotOwned() {
+        UUID routeId = UUID.randomUUID();
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findByIdAndUserId(routeId, user.getId()))
+                .thenReturn(Optional.empty());
+
+        var request = new UpdateRouteRequest("Renamed", null, null);
+
+        assertThatThrownBy(() -> routeService.updateRoute("rider@example.com", routeId, request))
+                .isInstanceOf(RouteNotFoundException.class);
+
+        verify(routeRepository, never()).save(any());
+    }
+
+    @Test
+    void updateRoute_throwsIllegalArgument_whenVisibilityInvalid() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute();
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findByIdAndUserId(routeId, user.getId()))
+                .thenReturn(Optional.of(route));
+
+        var request = new UpdateRouteRequest(null, null, "secret");
+
+        assertThatThrownBy(() -> routeService.updateRoute("rider@example.com", routeId, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Visibility");
+
+        verify(routeRepository, never()).save(any());
+    }
+
+    @Test
+    void updateRoute_throwsIllegalArgument_whenTitleBlank() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute();
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findByIdAndUserId(routeId, user.getId()))
+                .thenReturn(Optional.of(route));
+
+        var request = new UpdateRouteRequest("   ", null, null);
+
+        assertThatThrownBy(() -> routeService.updateRoute("rider@example.com", routeId, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blank");
+
+        verify(routeRepository, never()).save(any());
+    }
+
+    @Test
+    void updateRoute_throwsIllegalState_whenRouteIsProtected() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute();
+        route.setProtected(true);
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findByIdAndUserId(routeId, user.getId()))
+                .thenReturn(Optional.of(route));
+
+        var request = new UpdateRouteRequest("New Title", null, null);
+
+        assertThatThrownBy(() -> routeService.updateRoute("rider@example.com", routeId, request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Protected");
+
+        verify(routeRepository, never()).save(any());
+    }
+
+    @Test
+    void updateRoute_clearsDescription_whenEmptyStringProvided() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute();
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findByIdAndUserId(routeId, user.getId()))
+                .thenReturn(Optional.of(route));
+        when(routeRepository.save(any(Route.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var request = new UpdateRouteRequest(null, "", null);
+        RouteResponse response = routeService.updateRoute("rider@example.com", routeId, request);
+
+        assertThat(response.description()).isEmpty();
+    }
+
+    // ── getPublicRoutesByUser ────────────────────────────────────────────────
+
+    @Test
+    void getPublicRoutesByUser_returnsOnlyPublicRoutesForUser() {
+        UUID targetUserId = UUID.randomUUID();
+        when(routeRepository.findByUserIdAndVisibility(targetUserId, "public"))
+                .thenReturn(List.of(buildSavedRoute()));
+
+        List<RouteResponse> result = routeService.getPublicRoutesByUser(targetUserId);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().visibility()).isEqualTo("public");
+        verify(routeRepository).findByUserIdAndVisibility(targetUserId, "public");
+    }
+
+    @Test
+    void getPublicRoutesByUser_returnsEmptyList_forUnknownUser() {
+        UUID unknown = UUID.randomUUID();
+        when(routeRepository.findByUserIdAndVisibility(unknown, "public"))
+                .thenReturn(List.of());
+
+        assertThat(routeService.getPublicRoutesByUser(unknown)).isEmpty();
     }
 }

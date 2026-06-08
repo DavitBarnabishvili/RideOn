@@ -20,8 +20,6 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsString;
@@ -234,5 +232,108 @@ class RouteControllerIntegrationTest {
                 .andExpect(header().string("Content-Disposition", containsString("attachment")))
                 .andExpect(content().contentType("application/gpx+xml"))
                 .andExpect(content().string(containsString("<gpx")));
+    }
+
+    @Test
+    void updateRoute_updatesTitleAndVisibility() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Original Title", "public")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        String patch = """
+                { "title": "Updated Title", "visibility": "private" }
+                """;
+
+        mockMvc.perform(patch("/api/v1/routes/" + routeId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(patch))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Updated Title"))
+                .andExpect(jsonPath("$.visibility").value("private"))
+                // description not in patch body → unchanged
+                .andExpect(jsonPath("$.description").value("A scenic route"));
+    }
+
+    @Test
+    void updateRoute_returnsNotFound_forAnotherUsersRoute() throws Exception {
+        // Route owned by the @BeforeEach user
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Someone Elses", "public")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        // A second, different user
+        var otherReg = new RegisterRequest("other" + UUID.randomUUID() + "@example.com", "password123");
+        mockMvc.perform(post("/api/v1/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(otherReg)));
+        MvcResult otherLogin = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new LoginRequest(otherReg.email(), "password123"))))
+                .andReturn();
+        String otherToken = objectMapper.readTree(otherLogin.getResponse().getContentAsString())
+                .get("token").asText();
+
+        mockMvc.perform(patch("/api/v1/routes/" + routeId)
+                        .header("Authorization", "Bearer " + otherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"title\": \"Hijacked\" }"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void updateRoute_returnsBadRequest_forInvalidVisibility() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Valid Route", "public")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        mockMvc.perform(patch("/api/v1/routes/" + routeId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"visibility\": \"secret\" }"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getRoutesByUser_returnsOnlyPublicRoutes_andIsPublic() throws Exception {
+        // Owner creates one public + one private route
+        mockMvc.perform(post("/api/v1/routes")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(routeBody("Public One", "public")));
+        mockMvc.perform(post("/api/v1/routes")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(routeBody("Private One", "private")));
+
+        // Resolve the owner's userId from one of their routes via /my
+        MvcResult my = mockMvc.perform(get("/api/v1/routes/my")
+                        .header("Authorization", "Bearer " + token))
+                .andReturn();
+        String userId = objectMapper.readTree(my.getResponse().getContentAsString())
+                .get(0).get("userId").asText();
+
+        // No token — endpoint is public discovery
+        mockMvc.perform(get("/api/v1/routes").param("userId", userId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[?(@.visibility == 'private')]").isEmpty())
+                .andExpect(jsonPath("$[?(@.title == 'Public One')]").exists());
     }
 }
