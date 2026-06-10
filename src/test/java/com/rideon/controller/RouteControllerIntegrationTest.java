@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.util.Objects;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsString;
@@ -35,6 +36,7 @@ class RouteControllerIntegrationTest {
 
     @Container
     @ServiceConnection
+    @SuppressWarnings("resource")
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
             DockerImageName.parse("postgis/postgis:16-3.4")
                     .asCompatibleSubstituteFor("postgres")
@@ -179,7 +181,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void importGpx_createsRouteFromFile() throws Exception {
-        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
+        byte[] gpxBytes = Objects.requireNonNull(getClass().getResourceAsStream("/test-route.gpx")).readAllBytes();
 
         mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route.gpx",
@@ -193,7 +195,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void importGpx_respectsVisibilityParam() throws Exception {
-        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
+        byte[] gpxBytes = Objects.requireNonNull(getClass().getResourceAsStream("/test-route.gpx")).readAllBytes();
 
         mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route.gpx",
@@ -208,7 +210,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void importGpx_preservesElevation() throws Exception {
-        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
+        byte[] gpxBytes = Objects.requireNonNull(getClass().getResourceAsStream("/test-route.gpx")).readAllBytes();
 
         MvcResult result = mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route.gpx",
@@ -232,7 +234,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void importGpx_withoutElevation_succeedsWithNullElevation() throws Exception {
-        byte[] gpxBytes = getClass().getResourceAsStream("/test-route-no-elevation.gpx").readAllBytes();
+        byte[] gpxBytes = Objects.requireNonNull(getClass().getResourceAsStream("/test-route-no-elevation.gpx")).readAllBytes();
 
         mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route-no-elevation.gpx",
@@ -279,7 +281,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void exportGpx_includesElevation_whenRouteHasElevationData() throws Exception {
-        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
+        byte[] gpxBytes = Objects.requireNonNull(getClass().getResourceAsStream("/test-route.gpx")).readAllBytes();
 
         MvcResult imported = mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route.gpx",
@@ -298,7 +300,7 @@ class RouteControllerIntegrationTest {
 
     @Test
     void exportGpx_omitsElevation_whenRouteHasNoElevationData() throws Exception {
-        byte[] gpxBytes = getClass().getResourceAsStream("/test-route-no-elevation.gpx").readAllBytes();
+        byte[] gpxBytes = Objects.requireNonNull(getClass().getResourceAsStream("/test-route-no-elevation.gpx")).readAllBytes();
 
         MvcResult imported = mockMvc.perform(multipart("/api/v1/routes/import")
                         .file(new MockMultipartFile("file", "test-route-no-elevation.gpx",
