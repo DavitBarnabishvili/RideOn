@@ -81,13 +81,13 @@ The ship checkpoint is what makes Phases 4–6 mean something: you split, instru
 ## Current status
 
 **Phase:** 1 — Monolith
-**Current week:** Week 5–6 complete — route discovery / enrichment closed out
-**Last completed:** PATCH update endpoint + public browse-by-user endpoint
-**Test count:** **86 test methods** (0 disabled) — verify with `./mvnw test`
-**Active branch:** `feature/route-enrichment`
+**Current week:** Week 7 complete — post-review hardening (pre-roles cleanup)
+**Last completed:** Full code-review hardening: visibility validated on create, GPX no-elevation import fixed, framework-exception mapping, dedicated domain exceptions (409 for protected), public `GET /routes/{id}`, JWT secret externalized, multipart limits, export `<ele>` guard
+**Test count:** **105 test methods** (0 disabled) — verify with `./mvnw test`
+**Active branch:** `feature/code-review-hardening`
 **Next:** see **Immediate next steps** below — Step 0 weather spike → roles & admin → `Trip` + weather + speed engine → community hazards → ratings & reviews → clustering → (minimal) notifications
 
-> Endpoints live: `POST /routes`, `PATCH /routes/{id}`, `POST /routes/import`, `GET /routes/{id}/export`, `GET /routes/my`, `GET /routes?userId=`, `GET /routes/near`, `DELETE /routes/{id}`. Shared `validateVisibility()`. `UpdateRouteRequest` intentionally has no coordinates field (geometry immutable).
+> Endpoints live: `POST /routes`, `GET /routes/{id}` (public for public routes), `PATCH /routes/{id}`, `POST /routes/import`, `GET /routes/{id}/export`, `GET /routes/my`, `GET /routes?userId=`, `GET /routes/near`, `DELETE /routes/{id}`. Shared `validateVisibility()` + `requireVisible()`. `UpdateRouteRequest` intentionally has no coordinates field (geometry immutable).
 
 ---
 
@@ -118,6 +118,7 @@ Class-by-class detail lives in the repo; the *why* is in **Key decisions** below
 - **Rider profiles (Wk 3):** `Bike` entity (incl. `type` + `engineCc` — will drive the speed engine), `FileStorageService` interface + Cloudinary impl, photo upload, ownership-scoped queries.
 - **Route foundation (Wk 4):** PostGIS (`postgis/postgis:16-3.4`), Hibernate Spatial + JTS, V3/V4 migrations, `LINESTRING` path, `ST_DWithin` proximity, GiST index, create/my/near/delete.
 - **Route discovery + enrichment (Wk 5–6):** GPX import/export (jpx, Douglas-Peucker), V5 `LINESTRINGZ` elevation migration (gain/loss), `RouteResponse` coordinates as `List<Double[]>` with explicit null ele, `PATCH /routes/{id}`, public `GET /routes?userId=`, shared `validateVisibility()`, `GeometryFactory` bean, `UserService.requireUser()`, `@Transactional` everywhere. **86 tests passing.**
+- **Post-review hardening (Wk 7):** external code review of the full repo, then fixes: visibility validated on `createRoute`; GPX import without `<ele>` fixed (all-or-nothing elevation, Z=0.0 placeholder — NaN broke `LINESTRINGZ` inserts); export `<ele>` guard switched to `elevationGainM != null` (placeholder routes no longer export fake zero elevation); `GlobalExceptionHandler` extends `ResponseEntityExceptionHandler` so framework 4xx no longer become 500s, with generic client messages per status family; dedicated `InvalidVisibilityException` (400) + `ProtectedRouteException` (**409**); new public `GET /routes/{id}`; JWT secret externalized to `JWT_SECRET_KEY`; 20MB multipart limit with 413 mapping; JWT parsed once per request; coordinate pairs validated as exactly `[lon, lat]`. **105 tests passing.**
 
 ---
 
@@ -163,6 +164,11 @@ and the platform has:
 - **Public routes listed explicitly** — wildcard `/auth/**` let `GET /auth/me` through.
 - **`JwtAuthEntryPoint` returns structured 401 JSON**, injects the Spring `ObjectMapper`.
 - **`GlobalExceptionHandler` logs 500s at ERROR level**; maps 409/400/401/404 by exception type, catch-all → 500.
+- **`GlobalExceptionHandler` extends `ResponseEntityExceptionHandler`** — framework exceptions (missing param, wrong method, malformed JSON, oversized upload) map to their correct 4xx instead of falling into the catch-all as 500s. Specific-over-generic handler resolution keeps the catch-all safe for true unknowns.
+- **Client-facing error messages are generic per status family** — raw `ex.getMessage()` from framework exceptions leaks Jackson parser positions and class names. One exception: missing request params get a safe, self-built `"Missing required parameter: <name>"`.
+- **Domain errors use dedicated exception types** — `InvalidVisibilityException` → 400, `ProtectedRouteException` → **409** (deliberate upgrade from 400: the request is well-formed, the resource state forbids it). Broad `IllegalState`/`IllegalArgument` handlers no longer carry domain semantics.
+- **JWT secret is env-only (`JWT_SECRET_KEY`), no fallback — fail-fast at boot.** The previously committed key sits in public git history → permanently compromised, never reuse anywhere. Test profile carries its own random key.
+- **JWT is parsed/verified once per request** in the filter (`parseClaims`); expired/invalid → request proceeds unauthenticated.
 
 ### Spatial / geometry
 - **Longitude first, latitude second** — PostGIS/JTS convention.
@@ -183,13 +189,16 @@ and the platform has:
 - **`is_protected`** — admin-set; blocks deletion/edits regardless of ownership.
 - **`ON DELETE RESTRICT` on `routes.user_id`** — never cascade-delete community routes.
 - **`visibility` / `bike_type` are `VARCHAR`, not enums** — validation in the service layer; no migration to add values.
-- **Non-owner access returns 404, not 403** (delete + private export) — never confirm existence to a non-owner.
+- **Non-owner access returns 404, not 403** (delete + private export + detail) — never confirm existence to a non-owner, including anonymous viewers.
+- **`GET /routes/{id}` is public for public routes** — consistent with `/near`; anonymous or non-owner access to a private route → 404. In `SecurityConfig`, `/routes/my` is matched `authenticated()` *before* the `/routes/*` wildcard (a test guards the ordering); `/{id}/export` (two segments) is not matched by `/*` and stays authenticated.
 - **`findByIdAndUserId` scopes owned-resource ops** to the authenticated user.
 
 ### GPX & validation
 - **GPX import uses `Mode.LENIENT`.**
 - **Douglas-Peucker applied only to GPX imports** (ε=0.0001°); user coordinates are intentional. Z preserved (`SimplificationTest`).
-- **GPX export includes `<ele>` only when *all* points have elevation** — temporary guard, dead code after OpenTopoData backfill.
+- **GPX import without `<ele>` stores Z=0.0** — the same placeholder convention as manual routes; elevation is all-or-nothing per file. Geolatte (under Hibernate Spatial) decides 2D vs 3D from the *first* coordinate's NaN, so NaN Z values break `LINESTRINGZ` inserts.
+- **GPX export includes `<ele>` only when `elevationGainM != null`** — the authoritative signal, *not* a Z scan: placeholder routes store Z=0.0, which a Z-based check would export as fake zero elevation. Guard retired by the OpenTopoData backfill.
+- **Multipart upload limit is 20MB** (`max-file-size` + `max-request-size`) — multi-hour 1Hz GPX recordings exceed Spring's 1MB default; oversize → 413 via the inherited handler. Tested with a dedicated context pinning a 1KB limit + `TestRestTemplate` (MockMvc doesn't exercise multipart limits).
 - **`@Validated` + `@Pattern` on `@RequestParam` avoided** — AOP proxy breaks exception propagation through Spring Security's `ExceptionTranslationFilter`; validate in the service layer.
 - **`produces` removed from binary `@GetMapping` (export)** — caused content-negotiation failure on JSON error; `Content-Type` set manually on the success path only.
 
@@ -326,7 +335,7 @@ Numbered for stable reference. PATCH + browse-by-user are done and removed.
 | # | Location | What & why | When to address |
 |---|----------|------------|-----------------|
 | 1 | `UserService.loadUserByUsername` | `ROLE_USER` hardcoded; a test asserts it so it breaks intentionally when roles arrive. | **Phase 1 — roles** |
-| 2 | `application*.yml` | JWT secret plaintext — never a real prod secret. | **Phase 3 (ship gate)** |
+| 2 | `application*.yml` | ✅ Resolved early (Wk 7) — secret externalized to `JWT_SECRET_KEY` env var, no fallback (fail-fast); test profile has its own key. Old committed key is compromised — never reuse. | Done |
 | 3 | `SecurityConfig` | CORS hardcoded to `localhost:3000` → config property. | **Phase 3** (frontend domain) |
 | 4 | Auth | No refresh token (24h access only) — need refresh/rotation/revocation. | **Before public V1 (Phase 3)** |
 | 5 | `UserService` | No `UserDetailsService` interface — becomes the contract boundary at the split. | **Phase 4** |
@@ -351,6 +360,7 @@ Numbered for stable reference. PATCH + browse-by-user are done and removed.
 | 24 | Elevation strategy | OpenTopoData public limits are strict (~1 req/sec, ~100 locations/req, ~1000/day — verify current). A full backfill is slow. Decide: self-host (Docker + SRTM) vs new-routes-only vs slow batch. | **Phase 2** (before relying on it) |
 | 25 | External-API tests | CI must never hit live Open-Meteo/OpenTopoData — stub with MockWebServer/WireMock; one manual contract check outside CI. | **Phase 2** (with the first external call) |
 | 26 | Hazard lifecycle | Type-based expiry windows are a per-type tuning decision; conflict resolution (corroboration vs "gone") deliberately omitted in V1. | When abuse/volume warrants |
+| 27 | `RouteController.exportGpx` | Export still requires auth even for public routes — now inconsistent with public `GET /routes/{id}` and `/near`; deliberate for V1 (download = heavier action, mild abuse surface). | If/when the frontend wants anonymous GPX download |
 | — | **Deferred features** (not debt — out of V1 by decision) | Route-line difficulty coloring · live in-ride re-estimation · weather condition scoring · ORS · Smart Departure Planner · rich notifications. | Post-ship / fast-follow |
 
 ---
@@ -388,7 +398,8 @@ Numbered for stable reference. PATCH + browse-by-user are done and removed.
 - **IntelliJ project root:** inner `rideon` folder where `pom.xml` lives.
 - **DB name / username / password:** all `rideon`.
 - Docker must be running for tests and local dev.
-- IntelliJ run config uses the EnvFile plugin → `.env`. `.env` holds `DB_*` + `CLOUDINARY_*`, is in `.gitignore`.
+- IntelliJ run config uses the EnvFile plugin → `.env`. `.env` holds `DB_*` + `CLOUDINARY_*` + `JWT_SECRET_KEY`, is in `.gitignore`.
+- **`JWT_SECRET_KEY` is required** — the app fails fast without it. Generate with `openssl rand -hex 32`.
 - **Terminal tests:** `./mvnw test` from Git Bash (test profile + YAML fallbacks; Cloudinary uses a `:test` fallback).
 - GitHub: branch protection on main; auto-delete head branches on merge.
 - **Testcontainers** needs `postgis/postgis:16-3.4` with `asCompatibleSubstituteFor("postgres")` + `withInitScript("postgis-init.sql")`; plain `postgres:16` fails V3. Random container names are expected.
@@ -406,4 +417,4 @@ Numbered for stable reference. PATCH + browse-by-user are done and removed.
 
 Update the checkboxes and status as you complete work. At the start of a new chat, paste this file (or link it) and say "pick up where we left off." For class-by-class detail, point the session at the repo; this file carries the plan and the *why*.
 
-*Last updated: June 2026 — Week 5–6 route discovery complete (86 tests). **V1 scope locked:** create/import/export routes; community star ratings (= the "fun" signal); static `Trip` planning with stops + optional return; geometry-derived bike-aware speed engine (curvature + gradient + hazards, no ORS); per-waypoint weather at arrival (recompute on reopen); community hazards with corroborate/update/declare-gone + admin-seeded known hazards; progressive-disclosure hazard map. Deferred: route-line difficulty coloring, live in-ride re-estimation, weather condition scoring, ORS, the Smart Departure Planner. Ship V1 from a simple host with CI/CD before the microservices split, then evolve the live system.*
+*Last updated: June 2026 — Week 7 post-review hardening complete (105 tests): framework-exception mapping, public route detail, JWT secret externalized, GPX no-elevation fix, export `<ele>` guard, 409 for protected routes. **V1 scope locked:** create/import/export routes; community star ratings (= the "fun" signal); static `Trip` planning with stops + optional return; geometry-derived bike-aware speed engine (curvature + gradient + hazards, no ORS); per-waypoint weather at arrival (recompute on reopen); community hazards with corroborate/update/declare-gone + admin-seeded known hazards; progressive-disclosure hazard map. Deferred: route-line difficulty coloring, live in-ride re-estimation, weather condition scoring, ORS, the Smart Departure Planner. Ship V1 from a simple host with CI/CD before the microservices split, then evolve the live system.*
