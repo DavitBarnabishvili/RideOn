@@ -1,6 +1,7 @@
 package com.rideon.security;
 
 import com.rideon.service.UserService;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,12 +40,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         final String token = authHeader.substring(7);
 
-        if (!jwtUtil.validateToken(token)) {
+        final Claims claims;
+        try {
+            claims = jwtUtil.parseClaims(token);
+        } catch (Exception e) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String email = jwtUtil.extractEmail(token);
+        final String email = claims.getSubject();
 
         if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = userService.loadUserByUsername(email);

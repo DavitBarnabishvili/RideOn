@@ -5,6 +5,8 @@ import com.rideon.domain.User;
 import com.rideon.dto.request.RouteRequest;
 import com.rideon.dto.request.UpdateRouteRequest;
 import com.rideon.dto.response.RouteResponse;
+import com.rideon.exception.InvalidVisibilityException;
+import com.rideon.exception.ProtectedRouteException;
 import com.rideon.exception.RouteNotFoundException;
 import com.rideon.repository.RouteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -137,6 +139,35 @@ class RouteServiceTest {
     }
 
     @Test
+    void createRoute_throwsInvalidVisibilityException_whenVisibilityInvalid() {
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+
+        assertThatThrownBy(() -> routeService.createRoute("rider@example.com", buildRequest("banana")))
+                .isInstanceOf(InvalidVisibilityException.class)
+                .hasMessageContaining("Visibility");
+
+        verify(routeRepository, never()).save(any());
+    }
+
+    @Test
+    void createRoute_throwsIllegalArgumentException_whenCoordinatePairHasWrongLength() {
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+
+        var request = new RouteRequest(
+                "Bad Route",
+                "desc",
+                List.of(new double[]{44.79}, new double[]{44.82, 41.72}),
+                "public"
+        );
+
+        assertThatThrownBy(() -> routeService.createRoute("rider@example.com", request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("[lon, lat]");
+
+        verify(routeRepository, never()).save(any());
+    }
+
+    @Test
     void getMyRoutes_returnsRoutesForUser() {
         when(userService.requireUser("rider@example.com")).thenReturn(user);
         when(routeRepository.findByUserId(any())).thenReturn(List.of(buildSavedRoute()));
@@ -188,7 +219,7 @@ class RouteServiceTest {
     }
 
     @Test
-    void deleteRoute_throwsIllegalStateException_whenRouteIsProtected() {
+    void deleteRoute_throwsProtectedRouteException_whenRouteIsProtected() {
         UUID routeId = UUID.randomUUID();
         Route route = buildSavedRoute();
         route.setProtected(true);
@@ -198,7 +229,7 @@ class RouteServiceTest {
                 .thenReturn(Optional.of(route));
 
         assertThatThrownBy(() -> routeService.deleteRoute("rider@example.com", routeId))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(ProtectedRouteException.class)
                 .hasMessageContaining("Protected");
 
         verify(routeRepository, never()).delete(any());
@@ -220,6 +251,88 @@ class RouteServiceTest {
         when(routeRepository.findById(routeId)).thenReturn(Optional.of(privateRoute));
 
         assertThatThrownBy(() -> routeService.exportGpx("rider@example.com", routeId))
+                .isInstanceOf(RouteNotFoundException.class);
+    }
+
+    // ── getRouteById ─────────────────────────────────────────────────────────
+
+    @Test
+    void getRouteById_returnsRoute_whenPublic() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute();
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findById(routeId)).thenReturn(Optional.of(route));
+
+        RouteResponse response = routeService.getRouteById("rider@example.com", routeId);
+
+        assertThat(response.title()).isEqualTo("Mountain Pass");
+    }
+
+    @Test
+    void getRouteById_returnsRoute_whenPrivateAndOwned() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute();
+        route.setVisibility("private");
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findById(routeId)).thenReturn(Optional.of(route));
+
+        RouteResponse response = routeService.getRouteById("rider@example.com", routeId);
+
+        assertThat(response.visibility()).isEqualTo("private");
+    }
+
+    @Test
+    void getRouteById_throwsRouteNotFoundException_whenPrivateAndNotOwned() {
+        UUID routeId = UUID.randomUUID();
+
+        User otherUser = new User();
+        otherUser.setId(UUID.randomUUID());
+        otherUser.setEmail("other@example.com");
+
+        Route privateRoute = buildSavedRoute();
+        privateRoute.setVisibility("private");
+        privateRoute.setUser(otherUser);
+
+        when(userService.requireUser("rider@example.com")).thenReturn(user);
+        when(routeRepository.findById(routeId)).thenReturn(Optional.of(privateRoute));
+
+        assertThatThrownBy(() -> routeService.getRouteById("rider@example.com", routeId))
+                .isInstanceOf(RouteNotFoundException.class);
+    }
+
+    @Test
+    void getRouteById_returnsRoute_whenPublicAndAnonymous() {
+        UUID routeId = UUID.randomUUID();
+        Route route = buildSavedRoute();
+
+        when(routeRepository.findById(routeId)).thenReturn(Optional.of(route));
+
+        RouteResponse response = routeService.getRouteById(null, routeId);
+
+        assertThat(response.title()).isEqualTo("Mountain Pass");
+    }
+
+    @Test
+    void getRouteById_throwsRouteNotFoundException_whenPrivateAndAnonymous() {
+        UUID routeId = UUID.randomUUID();
+        Route privateRoute = buildSavedRoute();
+        privateRoute.setVisibility("private");
+
+        when(routeRepository.findById(routeId)).thenReturn(Optional.of(privateRoute));
+
+        assertThatThrownBy(() -> routeService.getRouteById(null, routeId))
+                .isInstanceOf(RouteNotFoundException.class);
+    }
+
+    @Test
+    void getRouteById_throwsRouteNotFoundException_whenRouteMissing() {
+        UUID routeId = UUID.randomUUID();
+
+        when(routeRepository.findById(routeId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> routeService.getRouteById("rider@example.com", routeId))
                 .isInstanceOf(RouteNotFoundException.class);
     }
 
@@ -261,7 +374,7 @@ class RouteServiceTest {
     }
 
     @Test
-    void updateRoute_throwsIllegalArgument_whenVisibilityInvalid() {
+    void updateRoute_throwsInvalidVisibilityException_whenVisibilityInvalid() {
         UUID routeId = UUID.randomUUID();
         Route route = buildSavedRoute();
 
@@ -272,7 +385,7 @@ class RouteServiceTest {
         var request = new UpdateRouteRequest(null, null, "secret");
 
         assertThatThrownBy(() -> routeService.updateRoute("rider@example.com", routeId, request))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(InvalidVisibilityException.class)
                 .hasMessageContaining("Visibility");
 
         verify(routeRepository, never()).save(any());
@@ -297,7 +410,7 @@ class RouteServiceTest {
     }
 
     @Test
-    void updateRoute_throwsIllegalState_whenRouteIsProtected() {
+    void updateRoute_throwsProtectedRouteException_whenRouteIsProtected() {
         UUID routeId = UUID.randomUUID();
         Route route = buildSavedRoute();
         route.setProtected(true);
@@ -309,7 +422,7 @@ class RouteServiceTest {
         var request = new UpdateRouteRequest("New Title", null, null);
 
         assertThatThrownBy(() -> routeService.updateRoute("rider@example.com", routeId, request))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(ProtectedRouteException.class)
                 .hasMessageContaining("Protected");
 
         verify(routeRepository, never()).save(any());
