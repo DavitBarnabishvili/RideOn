@@ -2,7 +2,15 @@
 
 A purpose-built platform for motorcyclists. Find routes worth riding, see exactly what the weather will be like along your route at the time you'll actually be there, plan group rides, and connect with other riders in your area.
 
-Built as a long-term personal project — evolving from a monolith to microservices to a cloud-deployed production system.
+Built as a long-term personal project — evolving from a monolith, to a publicly shipped V1, to microservices, and finally to a cloud-deployed production system.
+
+> Full plan, decisions, and roadmap: [PROGRESS.md](PROGRESS.md)
+
+## What V1 looks like
+
+![RideOn V1 — route with per-waypoint weather, community reports, and ratings](docs/v1_mockup.png)
+
+*V1: a planned route on a plain map, the weather waiting at each point at the time you'll be there, community road reports along the way, and rider ratings — all from a chosen departure time.*
 
 ## The problem
 
@@ -19,17 +27,18 @@ This project started because I actually ride motorcycles and the problem is real
 
 The project is also deliberately built to be a learning journey. I want to take something from zero to a real, released product and understand every layer along the way.
 
-The architecture evolves intentionally through stages: starting as a simple local monolith, splitting into microservices, containerizing with full observability, and eventually migrating to a cloud-deployed production monster on AWS. Each migration is done manually and deliberately, not skipped to the end state, because the point is to understand *why* each architectural decision exists.
+The architecture evolves intentionally through stages: starting as a simple local monolith, finishing it into a real V1 and shipping it publicly with a proper deploy pipeline — and only then splitting into microservices, containerizing with full observability, and eventually migrating that live, running system into a cloud-deployed production monster on AWS. Each migration is done manually and deliberately, on a system real people can already use rather than a local toy, not skipped to the end state, because the point is to understand *why* each architectural decision exists.
 
 This means the codebase at any given point reflects where I am in that journey, not where it's going.
 
 ## Features (in progress)
 
-- Route discovery — browse community routes scored for curvature, elevation, and road surface
-- Weather along a route — conditions checked at each waypoint at the time you'll actually be there
+- Route discovery — browse community routes, find ones near you, and import your own
+- Weather along a route — the weather waiting at each waypoint at the time you'll actually be there, with arrival times estimated from your bike and the road itself
+- Community road reports — riders flag hazards and road info, and corroborate, update, or clear each other's reports; plus known trouble spots seeded in advance
+- Ratings & reviews — riders rate routes and leave reviews; the community decides what's worth riding, not an algorithm
 - GPX import and export — bring routes from Garmin, Komoot, or Strava
-- Group ride planning — create a ride, attach a route, manage join requests
-- Rider profiles — bike info, ride history, and uploaded routes as a community trust signal
+- Rider profiles — your bikes (which shape your time estimates) and the routes you've shared
 
 ## Tech stack
 
@@ -37,14 +46,15 @@ This means the codebase at any given point reflects where I am in that journey, 
 |---|---|
 | Language | Java 21 |
 | Framework | Spring Boot 3, Spring Security 6 |
-| Database | PostgreSQL 16 + PostGIS, Flyway migrations |
+| Database | PostgreSQL 16 + PostGIS, Hibernate Spatial + JTS, Flyway migrations |
 | Auth | JWT, BCrypt |
 | File storage | Cloudinary *(dev)* → S3 *(prod)* |
 | Testing | JUnit 5, Mockito, Testcontainers |
 | Build | Maven |
 | Local infra | Docker, Docker Compose |
 | CI | GitHub Actions |
-| External APIs | OpenRouteService, Open-Meteo *(planned)* |
+| External APIs | Open-Meteo *(weather)*, OpenTopoData *(elevation)*, jpx *(GPX)* — *OpenRouteService deferred* |
+| Caching / resilience | Redis, Resilience4j *(planned)* |
 | Cloud *(planned)* | AWS — RDS, ECS, S3, SQS, SES, Cognito |
 
 ## Running locally
@@ -102,11 +112,12 @@ src/main/java/com/rideon/
 
 | Phase | Description | Status |
 |---|---|---|
-| 1 | Monolith — auth, profiles, routes, group rides, notifications | In progress |
-| 2 | Route engine + weather overlay | Planned |
-| 3 | Microservices split | Planned |
-| 4 | Docker Compose orchestration + observability | Planned |
-| 5 | Cloud migration to AWS | Planned |
+| 1 | Monolith — auth, profiles, routes, ride planning, ratings & reviews, community reports, roles & admin | In progress |
+| 2 | Route engine + weather overlay (the differentiator) | Planned |
+| 3 | Frontend + public V1 ship + CI/CD | Planned |
+| 4 | Microservices split — of the live, running system | Planned |
+| 5 | Orchestration + observability | Planned |
+| 6 | Cloud migration to AWS | Planned |
 
 ## Author
 
