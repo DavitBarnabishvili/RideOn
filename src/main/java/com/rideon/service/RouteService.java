@@ -5,6 +5,8 @@ import com.rideon.domain.User;
 import com.rideon.dto.request.RouteRequest;
 import com.rideon.dto.request.UpdateRouteRequest;
 import com.rideon.dto.response.RouteResponse;
+import com.rideon.exception.InvalidVisibilityException;
+import com.rideon.exception.ProtectedRouteException;
 import com.rideon.exception.RouteNotFoundException;
 import com.rideon.repository.RouteRepository;
 import io.jenetics.jpx.GPX;
@@ -43,13 +45,16 @@ public class RouteService {
         // added via the OpenTopoData API integration in Phase 2.
         LineString path = toLineString2D(request.coordinates());
 
+        String visibility = request.visibility() != null ? request.visibility() : "public";
+        validateVisibility(visibility);
+
         Route route = new Route();
         route.setUser(user);
         route.setTitle(request.title());
         route.setDescription(request.description());
         route.setPath(path);
         route.setDistanceM(path.getLength() * 111_320);
-        route.setVisibility(request.visibility() != null ? request.visibility() : "public");
+        route.setVisibility(visibility);
 
         return toResponse(routeRepository.save(route));
     }
@@ -85,7 +90,8 @@ public class RouteService {
                 .flatMap(Track::getName)
                 .orElse("Imported route");
 
-        LineString path = simplify(toLineString3D(wayPoints));
+        boolean hasElevation = wayPoints.stream().allMatch(wp -> wp.getElevation().isPresent());
+        LineString path = simplify(toLineString3D(wayPoints, hasElevation));
 
         Route route = new Route();
         route.setUser(user);
@@ -94,9 +100,27 @@ public class RouteService {
         route.setPath(path);
         route.setDistanceM(path.getLength() * 111_320);
         route.setVisibility(visibility != null ? visibility : "public");
-        computeElevation(route);
+        if (hasElevation) {
+            computeElevation(route);
+        }
 
         return toResponse(routeRepository.save(route));
+    }
+
+    /**
+     * Route detail. {@code email} is null for anonymous requests — public
+     * routes are viewable by anyone; private routes 404 unless the viewer
+     * is the owner.
+     */
+    @Transactional(readOnly = true)
+    public RouteResponse getRouteById(String email, UUID routeId) {
+        Route route = routeRepository.findById(routeId)
+                .orElseThrow(() -> new RouteNotFoundException("Route not found: " + routeId));
+
+        User viewer = email != null ? userService.requireUser(email) : null;
+        requireVisible(route, viewer, routeId);
+
+        return toResponse(route);
     }
 
     @Transactional(readOnly = true)
@@ -105,25 +129,24 @@ public class RouteService {
         Route route = routeRepository.findById(routeId)
                 .orElseThrow(() -> new RouteNotFoundException("Route not found: " + routeId));
 
-        if (route.getVisibility().equals("private") && !route.getUser().getId().equals(user.getId())) {
-            throw new RouteNotFoundException("Route not found: " + routeId);
-        }
+        requireVisible(route, user, routeId);
 
         Coordinate[] coords = route.getPath().getCoordinates();
 
-        // Include <ele> only when every point has valid elevation data.
-        // Partial elevation produces spec-valid but consumer-unreliable GPX.
-        // Routes without full elevation will be backfilled by the OpenTopoData
-        // integration in Phase 2, at which point this guard becomes unnecessary.
-        boolean allElevationsValid = Arrays.stream(coords)
-                .allMatch(c -> !Double.isNaN(c.getZ()));
+        // Include <ele> only when the route carries real elevation data.
+        // elevationGainM != null is the authoritative signal — Z values are an
+        // implementation detail, and placeholder routes (manual creation, GPX
+        // without <ele>) store Z = 0.0, which a Z-based check would export as
+        // fake zero elevation. The OpenTopoData backfill (Phase 2) retires
+        // this guard by giving every route real elevation.
+        boolean hasRealElevation = route.getElevationGainM() != null;
 
         GPX gpx = GPX.builder()
                 .addTrack(track -> track
                         .name(route.getTitle())
                         .addSegment(seg -> {
                             for (Coordinate c : coords) {
-                                if (allElevationsValid) {
+                                if (hasRealElevation) {
                                     seg.addPoint(p -> p.lat(c.y).lon(c.x).ele(c.getZ()));
                                 } else {
                                     seg.addPoint(p -> p.lat(c.y).lon(c.x));
@@ -183,7 +206,7 @@ public class RouteService {
         // edits (mirrors deleteRoute) so an owner can't flip one to private and
         // hide it. Relax to per-field rules when the admin/role system exists.
         if (route.isProtected()) {
-            throw new IllegalStateException("Protected routes cannot be modified");
+            throw new ProtectedRouteException("Protected routes cannot be modified");
         }
 
         // PATCH semantics: only non-null fields are applied. A present field is
@@ -214,7 +237,7 @@ public class RouteService {
                 .orElseThrow(() -> new RouteNotFoundException("Route not found: " + routeId));
 
         if (route.isProtected()) {
-            throw new IllegalStateException("Protected routes cannot be deleted");
+            throw new ProtectedRouteException("Protected routes cannot be deleted");
         }
 
         routeRepository.delete(route);
@@ -232,23 +255,30 @@ public class RouteService {
      */
     private LineString toLineString2D(List<double[]> coordinates) {
         Coordinate[] coords = coordinates.stream()
-                .map(c -> new Coordinate(c[0], c[1], 0.0))
+                .map(c -> {
+                    if (c == null || c.length != 2) {
+                        throw new IllegalArgumentException("Each coordinate must be a [lon, lat] pair");
+                    }
+                    return new Coordinate(c[0], c[1], 0.0);
+                })
                 .toArray(Coordinate[]::new);
         return geometryFactory.createLineString(coords);
     }
 
     /**
-     * Builds a 3D LineString from GPX WayPoints, preserving elevation where present.
-     * Points without an elevation value get Z = NaN (JTS convention for missing Z).
+     * Builds a 3D LineString from GPX WayPoints. When every point has an
+     * &lt;ele&gt; value, Z carries real elevation; otherwise every Z is set to
+     * the same 0.0 placeholder used for manual routes — a LINESTRINGZ column
+     * rejects NaN, and Geolatte decides 2D vs 3D from the first coordinate's Z.
      */
-    private LineString toLineString3D(List<WayPoint> wayPoints) {
+    private LineString toLineString3D(List<WayPoint> wayPoints, boolean hasElevation) {
         Coordinate[] coords = wayPoints.stream()
                 .map(wp -> {
                     double lon = wp.getLongitude().doubleValue();
                     double lat = wp.getLatitude().doubleValue();
-                    double ele = wp.getElevation()
-                            .map(Length::doubleValue)
-                            .orElse(Double.NaN);
+                    double ele = hasElevation
+                            ? wp.getElevation().map(Length::doubleValue).orElseThrow()
+                            : 0.0;
                     return new Coordinate(lon, lat, ele);
                 })
                 .toArray(Coordinate[]::new);
@@ -257,16 +287,10 @@ public class RouteService {
 
     /**
      * Computes elevation gain and loss from Z coordinates and sets them on the route.
-     * Skipped silently if any Z is NaN — this covers manually created routes and any
-     * GPX file missing ele tags. Will become unreachable for GPX imports once
-     * OpenTopoData backfill is in place (Phase 2).
+     * Only called when every coordinate carries real elevation data.
      */
     private void computeElevation(Route route) {
         Coordinate[] coords = route.getPath().getCoordinates();
-        boolean allValid = Arrays.stream(coords).allMatch(c -> !Double.isNaN(c.getZ()));
-        if (!allValid) {
-            return;
-        }
 
         double gain = 0.0;
         double loss = 0.0;
@@ -314,7 +338,19 @@ public class RouteService {
 
     private void validateVisibility(String visibility) {
         if (!visibility.equals("public") && !visibility.equals("private")) {
-            throw new IllegalArgumentException("Visibility must be 'public' or 'private'");
+            throw new InvalidVisibilityException("Visibility must be 'public' or 'private'");
+        }
+    }
+
+    /**
+     * Non-owner (or anonymous) access to a private route returns 404, never
+     * 403 — never confirm a route's existence to someone who doesn't own it.
+     * {@code viewer} may be null (anonymous).
+     */
+    private void requireVisible(Route route, User viewer, UUID routeId) {
+        boolean isOwner = viewer != null && route.getUser().getId().equals(viewer.getId());
+        if (route.getVisibility().equals("private") && !isOwner) {
+            throw new RouteNotFoundException("Route not found: " + routeId);
         }
     }
 }

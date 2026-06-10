@@ -23,6 +23,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -85,6 +86,33 @@ class RouteControllerIntegrationTest {
                 .andExpect(jsonPath("$.visibility").value("public"))
                 .andExpect(jsonPath("$.id").exists())
                 .andExpect(jsonPath("$.coordinates").isArray());
+    }
+
+    @Test
+    void createRoute_returnsBadRequest_forInvalidVisibility() throws Exception {
+        mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Bad Visibility", "banana")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createRoute_returnsBadRequest_whenCoordinatePairHasWrongLength() throws Exception {
+        String body = """
+                {
+                  "title": "Bad Coords",
+                  "description": "desc",
+                  "coordinates": [[44.79], [44.82, 41.72]],
+                  "visibility": "public"
+                }
+                """;
+
+        mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -203,6 +231,21 @@ class RouteControllerIntegrationTest {
     }
 
     @Test
+    void importGpx_withoutElevation_succeedsWithNullElevation() throws Exception {
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route-no-elevation.gpx").readAllBytes();
+
+        mockMvc.perform(multipart("/api/v1/routes/import")
+                        .file(new MockMultipartFile("file", "test-route-no-elevation.gpx",
+                                "application/gpx+xml", gpxBytes))
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.title").value("No Elevation Route"))
+                .andExpect(jsonPath("$.elevationGainM").doesNotExist())
+                .andExpect(jsonPath("$.elevationLossM").doesNotExist())
+                .andExpect(jsonPath("$.coordinates[0][2]").doesNotExist());
+    }
+
+    @Test
     void createRoute_hasNullElevationInCoordinates() throws Exception {
         mockMvc.perform(post("/api/v1/routes")
                         .header("Authorization", "Bearer " + token)
@@ -232,6 +275,45 @@ class RouteControllerIntegrationTest {
                 .andExpect(header().string("Content-Disposition", containsString("attachment")))
                 .andExpect(content().contentType("application/gpx+xml"))
                 .andExpect(content().string(containsString("<gpx")));
+    }
+
+    @Test
+    void exportGpx_includesElevation_whenRouteHasElevationData() throws Exception {
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route.gpx").readAllBytes();
+
+        MvcResult imported = mockMvc.perform(multipart("/api/v1/routes/import")
+                        .file(new MockMultipartFile("file", "test-route.gpx",
+                                "application/gpx+xml", gpxBytes))
+                        .header("Authorization", "Bearer " + token))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(imported.getResponse().getContentAsString())
+                .get("id").asText();
+
+        mockMvc.perform(get("/api/v1/routes/" + routeId + "/export")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("<ele>")));
+    }
+
+    @Test
+    void exportGpx_omitsElevation_whenRouteHasNoElevationData() throws Exception {
+        byte[] gpxBytes = getClass().getResourceAsStream("/test-route-no-elevation.gpx").readAllBytes();
+
+        MvcResult imported = mockMvc.perform(multipart("/api/v1/routes/import")
+                        .file(new MockMultipartFile("file", "test-route-no-elevation.gpx",
+                                "application/gpx+xml", gpxBytes))
+                        .header("Authorization", "Bearer " + token))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(imported.getResponse().getContentAsString())
+                .get("id").asText();
+
+        // Placeholder Z=0.0 must never be exported as fake elevation.
+        mockMvc.perform(get("/api/v1/routes/" + routeId + "/export")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(content().string(not(containsString("<ele>"))));
     }
 
     @Test
@@ -335,5 +417,148 @@ class RouteControllerIntegrationTest {
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$[?(@.visibility == 'private')]").isEmpty())
                 .andExpect(jsonPath("$[?(@.title == 'Public One')]").exists());
+    }
+
+    // ── GlobalExceptionHandler / framework exception mapping ────────────────
+
+    @Test
+    void getRoutesNear_missingLat_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/routes/near")
+                        .param("lon", "44.79"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getRoutes_missingUserId_returnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/routes"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void postToNearEndpoint_wrongHttpMethod_returnsMethodNotAllowed() throws Exception {
+        mockMvc.perform(post("/api/v1/routes/near")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isMethodNotAllowed());
+    }
+
+    @Test
+    void createRoute_malformedJson_returnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ not valid json"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── GET /routes/{id} ─────────────────────────────────────────────────────
+
+    @Test
+    void getRoute_returnsRoute_whenPublic() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Detail View", "public")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        mockMvc.perform(get("/api/v1/routes/" + routeId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Detail View"));
+    }
+
+    @Test
+    void getRoute_returnsRoute_whenPrivateAndOwned() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Owner Only", "private")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        mockMvc.perform(get("/api/v1/routes/" + routeId)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Owner Only"))
+                .andExpect(jsonPath("$.visibility").value("private"));
+    }
+
+    @Test
+    void getRoute_returnsNotFound_forPrivateRouteOfAnotherUser() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Hidden Route", "private")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        var otherReg = new RegisterRequest("other" + UUID.randomUUID() + "@example.com", "password123");
+        mockMvc.perform(post("/api/v1/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(otherReg)));
+        MvcResult otherLogin = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new LoginRequest(otherReg.email(), "password123"))))
+                .andReturn();
+        String otherToken = objectMapper.readTree(otherLogin.getResponse().getContentAsString())
+                .get("token").asText();
+
+        mockMvc.perform(get("/api/v1/routes/" + routeId)
+                        .header("Authorization", "Bearer " + otherToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getRoute_isPubliclyAccessible_whenRouteIsPublic() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("No Token Route", "public")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        // No Authorization header — public route detail is anonymous-readable.
+        mockMvc.perform(get("/api/v1/routes/" + routeId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("No Token Route"));
+    }
+
+    @Test
+    void getRoute_returnsNotFound_forPrivateRoute_whenAnonymous() throws Exception {
+        MvcResult created = mockMvc.perform(post("/api/v1/routes")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(routeBody("Anon Hidden", "private")))
+                .andReturn();
+
+        String routeId = objectMapper.readTree(created.getResponse().getContentAsString())
+                .get("id").asText();
+
+        mockMvc.perform(get("/api/v1/routes/" + routeId))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getMyRoutes_returnsUnauthorized_withNoToken() throws Exception {
+        // Guards the security matcher ordering: /routes/my must be matched
+        // (authenticated) before the public /routes/* wildcard.
+        mockMvc.perform(get("/api/v1/routes/my"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void getRoute_returnsNotFound_whenRouteDoesNotExist() throws Exception {
+        mockMvc.perform(get("/api/v1/routes/" + UUID.randomUUID())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
     }
 }

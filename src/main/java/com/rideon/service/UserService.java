@@ -57,6 +57,7 @@ public class UserService implements UserDetailsService {
      * Returns the User entity for internal service use.
      * External callers (controllers) use getByEmail() which returns UserResponse.
      */
+    @Transactional(readOnly = true)
     public User requireUser(String email) {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));

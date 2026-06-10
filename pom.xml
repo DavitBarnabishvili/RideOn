@@ -11,20 +11,20 @@
 	<groupId>com.rideon</groupId>
 	<artifactId>rideon</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
+	<name>RideOn</name>
+	<description>A purpose-built platform for motorcyclists: discover routes, plan rides, and see weather along the way at the time you'll actually be there.</description>
+	<url>https://github.com/DavitBarnabishvili/RideOn</url>
 	<developers>
-		<developer/>
+		<developer>
+			<id>DavitBarnabishvili</id>
+			<name>Davit Barnabishvili</name>
+			<url>https://github.com/DavitBarnabishvili</url>
+		</developer>
 	</developers>
 	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
+		<connection>scm:git:https://github.com/DavitBarnabishvili/RideOn.git</connection>
+		<developerConnection>scm:git:https://github.com/DavitBarnabishvili/RideOn.git</developerConnection>
+		<url>https://github.com/DavitBarnabishvili/RideOn</url>
 	</scm>
 	<properties>
 		<java.version>21</java.version>

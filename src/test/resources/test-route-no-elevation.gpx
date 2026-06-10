@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RideOn-test"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>No Elevation Route</name>
+    <trkseg>
+      <trkpt lat="41.6941" lon="44.8337"></trkpt>
+      <trkpt lat="41.7200" lon="44.7800"></trkpt>
+      <trkpt lat="41.7600" lon="44.7200"></trkpt>
+      <trkpt lat="41.8347" lon="44.7212"></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

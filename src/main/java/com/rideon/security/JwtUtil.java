@@ -44,7 +44,7 @@ public class JwtUtil {
         }
     }
 
-    private Claims parseClaims(String token){
+    Claims parseClaims(String token){
         return Jwts.parser()
                 .verifyWith(secretKey)
                 .build()

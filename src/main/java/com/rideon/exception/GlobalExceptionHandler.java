@@ -4,20 +4,32 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Extends {@link ResponseEntityExceptionHandler} so framework-thrown exceptions
+ * (missing/unsatisfied request parameters, wrong HTTP method, malformed JSON,
+ * oversized multipart uploads, etc.) keep their correct 4xx status codes instead
+ * of falling into the catch-all 500 below. {@link #handleExceptionInternal}
+ * reformats those responses into this app's {@link ErrorResponse} body.
+ */
 @RestControllerAdvice
 @Order(Ordered.HIGHEST_PRECEDENCE)
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final org.slf4j.Logger log =
             org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
@@ -34,18 +46,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse(401, "Invalid email or password"));
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse> handleValidationFailure(MethodArgumentNotValidException ex) {
-        Map<String, String> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
-                .collect(Collectors.toMap(
-                        FieldError::getField,
-                        f -> f.getDefaultMessage() != null ? f.getDefaultMessage() : "invalid"
-                ));
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(400, "Validation failed", fieldErrors));
     }
 
     @ExceptionHandler(Exception.class)
@@ -70,6 +70,20 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(404, ex.getMessage()));
     }
 
+    @ExceptionHandler(InvalidVisibilityException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidVisibility(InvalidVisibilityException ex) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(400, ex.getMessage()));
+    }
+
+    @ExceptionHandler(ProtectedRouteException.class)
+    public ResponseEntity<ErrorResponse> handleProtectedRoute(ProtectedRouteException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(409, ex.getMessage()));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
         return ResponseEntity
@@ -89,10 +103,64 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(400, "Validation failed", errors));
     }
 
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex) {
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(
+            MethodArgumentNotValidException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        Map<String, String> fieldErrors = ex.getBindingResult().getFieldErrors().stream()
+                .collect(Collectors.toMap(
+                        FieldError::getField,
+                        f -> f.getDefaultMessage() != null ? f.getDefaultMessage() : "invalid",
+                        (a, b) -> a
+                ));
         return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(new ErrorResponse(400, ex.getMessage()));
+                .status(status)
+                .headers(headers)
+                .body(new ErrorResponse(status.value(), "Validation failed", fieldErrors));
+    }
+
+    /**
+     * Missing request parameters get a specific (but safe — we build it
+     * ourselves) message, since "Malformed or invalid request" alone would
+     * leave the caller guessing.
+     */
+    @Override
+    protected ResponseEntity<Object> handleMissingServletRequestParameter(
+            MissingServletRequestParameterException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        return ResponseEntity
+                .status(status)
+                .headers(headers)
+                .body(new ErrorResponse(status.value(), "Missing required parameter: " + ex.getParameterName()));
+    }
+
+    /**
+     * Framework exceptions get a generic message per status family —
+     * exception messages from e.g. Jackson include parser positions and
+     * class names, which we never echo to clients.
+     */
+    @Override
+    protected ResponseEntity<Object> handleExceptionInternal(
+            Exception ex, Object body, HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
+        if (statusCode.is5xxServerError()) {
+            log.error("Unexpected error", ex);
+        }
+        return ResponseEntity
+                .status(statusCode)
+                .headers(headers)
+                .body(new ErrorResponse(statusCode.value(), genericMessage(statusCode)));
+    }
+
+    private static String genericMessage(HttpStatusCode status) {
+        if (status.is5xxServerError()) {
+            return "An unexpected error occurred";
+        }
+        return switch (status.value()) {
+            case 400 -> "Malformed or invalid request";
+            case 404 -> "Resource not found";
+            case 405 -> "Method not allowed";
+            case 406 -> "Requested media type is not acceptable";
+            case 413 -> "Uploaded file exceeds the size limit";
+            case 415 -> "Unsupported media type";
+            default -> "Request could not be processed";
+        };
     }
 }

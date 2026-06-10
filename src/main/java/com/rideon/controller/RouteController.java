@@ -73,6 +73,16 @@ public class RouteController {
         return ResponseEntity.ok(routeService.getMyRoutes(authentication.getName()));
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<RouteResponse> getRoute(
+            @PathVariable UUID id,
+            Authentication authentication
+    ) {
+        // Public endpoint — authentication is null for anonymous requests.
+        String email = authentication != null ? authentication.getName() : null;
+        return ResponseEntity.ok(routeService.getRouteById(email, id));
+    }
+
     @GetMapping(params = "userId")
     public ResponseEntity<List<RouteResponse>> getRoutesByUser(@RequestParam UUID userId) {
         return ResponseEntity.ok(routeService.getPublicRoutesByUser(userId));

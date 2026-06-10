@@ -344,7 +344,7 @@ Numbered for stable reference. PATCH + browse-by-user are done and removed.
 | 17 | `RouteService.exportGpx` | `<ele>` omitted when any point lacks elevation — dead code after backfill. | **Phase 2** (OpenTopoData) |
 | 18 | `popularity_score` ordering | `/routes/near` orders by score, all 0.0 until ratings exist. | **Phase 1 — ratings** |
 | 19 | Logging | Debug logging in `application.yml` — remove before deploy; structured logging is Phase 5. | Remove: **Phase 3** / structured: Phase 5 |
-| 20 | `SecurityConfig` | `/auth/register` + `/auth/login` listed twice in `permitAll()`. | Next tidy-up |
+| 20 | `SecurityConfig` | ✅ Resolved — `/auth/register` + `/auth/login` each listed once in `permitAll()`. | Done |
 | 21 | Domain — `Ride` record | `Route` is a plan, not a record; add `Ride` when timestamped logs are ingested. | **Phase 2+** |
 | 22 | `Route` geometry editing | V1 immutable. Future: editable while private, lock on publish. | When the frontend needs path editing |
 | 23 | Speed engine | Default speed profile needed for users without a bike; the model is rough (rider skill dominates) — communicate estimate uncertainty in the UI. | **Phase 2 — speed engine** |

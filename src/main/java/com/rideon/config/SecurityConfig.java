@@ -50,6 +50,11 @@ public class SecurityConfig {
                                 "/v3/api-docs/**"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/routes").permitAll()
+                        // Route detail is public so anonymous users can view public
+                        // routes (consistent with /near); the service returns 404 for
+                        // private routes.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/routes/my").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/routes/*").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
